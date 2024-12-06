@@ -12,237 +12,7 @@ import time
 
 from config import Config
 import fetch_data
-
-
-"""
-As of the current version, the YOLO network has been removed from this code during optimization.
-It was found out that YOLO was adding too much processing delay, and the benefits from using it couldn't justify
-such heavy cost.
-If you're interested to see the implementation using YOLO, please check out the previous commit:
-https://github.com/hj3yoo/mtg_card_detector/tree/dea64611730c84a59c711c61f7f80948f82bcd31 
-"""
-
-
-def calc_image_hashes(card_pool, save_to=None, hash_size=None):
-    """
-    Calculate perceptual hash (pHash) value for each cards in the database, then store them if needed
-    :param card_pool: pandas dataframe containing all card information
-    :param save_to: path for the pickle file to be saved
-    :param hash_size: param for pHash algorithm
-    :return: pandas dataframe
-    """
-    if hash_size is None:
-        hash_size = [16, 32]
-    elif isinstance(hash_size, int):
-        hash_size = [hash_size]
-    
-    # Since some double-faced cards may result in two different cards, create a new dataframe to store the result
-    new_pool = pd.DataFrame(columns=list(card_pool.columns.values))
-    for hs in hash_size:
-            new_pool['card_hash_%d' % hs] = np.NaN
-            #new_pool['art_hash_%d' % hs] = np.NaN
-    for ind, card_info in card_pool.iterrows():
-        if ind % 100 == 0:
-            print('Calculating hashes: %dth card' % ind)
-
-        card_names = []
-        # Double-faced cards have a different json format than normal cards
-        if card_info['layout'] in ['transform', 'double_faced_token']:
-            if isinstance(card_info['card_faces'], str):
-                card_faces = ast.literal_eval(card_info['card_faces'])
-            else:
-                card_faces = card_info['card_faces']
-            for i in range(len(card_faces)):
-                card_names.append(card_faces[i]['name'])
-        else:  # if card_info['layout'] == 'normal':
-            card_names.append(card_info['name'])
-
-        for card_name in card_names:
-            # Fetch the image - name can be found based on the card's information
-            card_info['name'] = card_name
-            img_name = '%s/card_img/png/%s/%s_%s.png' % (Config.data_dir, card_info['set'],
-                                                         card_info['collector_number'],
-                                                         fetch_data.get_valid_filename(card_info['name']))
-            card_img = cv2.imread(img_name)
-
-            # If the image doesn't exist, download it from the URL
-            if card_img is None:
-                fetch_data.fetch_card_image(card_info,
-                                            out_dir='%s/card_img/png/%s' % (Config.data_dir, card_info['set']))
-                card_img = cv2.imread(img_name)
-            if card_img is None:
-                print('WARNING: card %s is not found!' % img_name)
-
-            # Compute value of the card's perceptual hash, then store it to the database
-            #img_art = Image.fromarray(card_img[121:580, 63:685])  # For 745*1040 size card image
-            img_card = Image.fromarray(card_img)
-            for hs in hash_size:
-                card_hash = ih.phash(img_card, hash_size=hs)
-                card_info['card_hash_%d' % hs] = card_hash
-                #art_hash = ih.phash(img_art, hash_size=hs)
-                #card_info['art_hash_%d' % hs] = art_hash
-            new_pool.loc[0 if new_pool.empty else new_pool.index.max() + 1] = card_info
-
-    if save_to is not None:
-        new_pool.to_pickle(save_to)
-    return new_pool
-
-
-# www.pyimagesearch.com/2014/08/25/4-point-opencv-getperspective-transform-example/
-def order_points(pts):
-    """
-    initialzie a list of coordinates that will be ordered such that the first entry in the list is the top-left,
-    the second entry is the top-right, the third is the bottom-right, and the fourth is the bottom-left
-    :param pts: array containing 4 points
-    :return: ordered list of 4 points
-    """
-    rect = np.zeros((4, 2), dtype="float32")
-
-    # the top-left point will have the smallest sum, whereas
-    # the bottom-right point will have the largest sum
-    s = pts.sum(axis=1)
-    rect[0] = pts[np.argmin(s)]
-    rect[2] = pts[np.argmax(s)]
-
-    # now, compute the difference between the points, the
-    # top-right point will have the smallest difference,
-    # whereas the bottom-left will have the largest difference
-    diff = np.diff(pts, axis=1)
-    rect[1] = pts[np.argmin(diff)]
-    rect[3] = pts[np.argmax(diff)]
-
-    # return the ordered coordinates
-    return rect
-
-
-def four_point_transform(image, pts):
-    """
-    Transform a quadrilateral section of an image into a rectangular area
-    From: www.pyimagesearch.com/2014/08/25/4-point-opencv-getperspective-transform-example/
-    :param image: source image
-    :param pts: 4 corners of the quadrilateral
-    :return: rectangular image of the specified area
-    """
-    # obtain a consistent order of the points and unpack them
-    # individually
-    rect = order_points(pts)
-    (tl, tr, br, bl) = rect
-
-    # compute the width of the new image, which will be the
-    # maximum distance between bottom-right and bottom-left
-    # x-coordiates or the top-right and top-left x-coordinates
-    widthA = np.sqrt(((br[0] - bl[0]) ** 2) + ((br[1] - bl[1]) ** 2))
-    widthB = np.sqrt(((tr[0] - tl[0]) ** 2) + ((tr[1] - tl[1]) ** 2))
-    maxWidth = max(int(widthA), int(widthB))
-
-    # compute the height of the new image, which will be the
-    # maximum distance between the top-right and bottom-right
-    # y-coordinates or the top-left and bottom-left y-coordinates
-    heightA = np.sqrt(((tr[0] - br[0]) ** 2) + ((tr[1] - br[1]) ** 2))
-    heightB = np.sqrt(((tl[0] - bl[0]) ** 2) + ((tl[1] - bl[1]) ** 2))
-    maxHeight = max(int(heightA), int(heightB))
-
-    # now that we have the dimensions of the new image, construct
-    # the set of destination points to obtain a "birds eye view",
-    # (i.e. top-down view) of the image, again specifying points
-    # in the top-left, top-right, bottom-right, and bottom-left
-    # order
-    dst = np.array([
-        [0, 0],
-        [maxWidth - 1, 0],
-        [maxWidth - 1, maxHeight - 1],
-        [0, maxHeight - 1]], dtype="float32")
-
-    # compute the perspective transform matrix and then apply it
-    mat = cv2.getPerspectiveTransform(rect, dst)
-    warped = cv2.warpPerspective(image, mat, (maxWidth, maxHeight))
-
-    # If the image is horizontally long, rotate it by 90
-    if maxWidth > maxHeight:
-        center = (maxHeight / 2, maxHeight / 2)
-        mat_rot = cv2.getRotationMatrix2D(center, 270, 1.0)
-        warped = cv2.warpAffine(warped, mat_rot, (maxHeight, maxWidth))
-
-    # return the warped image
-    return warped
-
-
-def remove_glare(img):
-    """
-    Reduce the effect of glaring in the image
-    Inspired from:
-    http://www.amphident.de/en/blog/preprocessing-for-automatic-pattern-identification-in-wildlife-removing-glare.html
-    The idea is to find area that has low saturation but high value, which is what a glare usually look like.
-    :param img: source image
-    :return: corrected image with glaring smoothened out
-    """
-    img_hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-    _, s, v = cv2.split(img_hsv)
-    non_sat = (s < 32) * 255  # Find all pixels that are not very saturated
-
-    # Slightly decrease the area of the non-satuared pixels by a erosion operation.
-    disk = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-    non_sat = cv2.erode(non_sat.astype(np.uint8), disk)
-
-    # Set all brightness values, where the pixels are still saturated to 0.
-    v[non_sat == 0] = 0
-    # filter out very bright pixels.
-    glare = (v > 200) * 255
-
-    # Slightly increase the area for each pixel
-    glare = cv2.dilate(glare.astype(np.uint8), disk)
-    glare_reduced = np.ones((img.shape[0], img.shape[1], 3), dtype=np.uint8) * 200
-    glare = cv2.cvtColor(glare, cv2.COLOR_GRAY2BGR)
-    corrected = np.where(glare, glare_reduced, img)
-    return corrected
-
-
-def find_card(img, thresh_c=5, kernel_size=(3, 3), size_thresh=10000):
-    """
-    Find contours of all cards in the image
-    :param img: source image
-    :param thresh_c: value of the constant C for adaptive thresholding
-    :param kernel_size: dimension of the kernel used for dilation and erosion
-    :param size_thresh: threshold for size (in pixel) of the contour to be a candidate
-    :return: list of candidate contours
-    """
-    # Typical pre-processing - grayscale, blurring, thresholding
-    img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    img_blur = cv2.medianBlur(img_gray, 5)
-    img_thresh = cv2.adaptiveThreshold(img_blur, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY_INV, 5, thresh_c)
-
-    # Dilute the image, then erode them to remove minor noises
-    kernel = np.ones(kernel_size, np.uint8)
-    img_dilate = cv2.dilate(img_thresh, kernel, iterations=1)
-    img_erode = cv2.erode(img_dilate, kernel, iterations=1)
-
-    # Find the contour
-    _, cnts, hier = cv2.findContours(img_erode, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-    if len(cnts) == 0:
-        #print('no contours')
-        return []
-
-    # The hierarchy from cv2.findContours() is similar to a tree: each node has an access to the parent, the first child
-    # their previous and next node
-    # Using recursive search, find the uppermost contour in the hierarchy that satisfies the condition
-    # The candidate contour must be rectangle (has 4 points) and should be larger than a threshold
-    cnts_rect = []
-    stack = [(0, hier[0][0])]
-    while len(stack) > 0:
-        i_cnt, h = stack.pop()
-        i_next, i_prev, i_child, i_parent = h
-        if i_next != -1:
-            stack.append((i_next, hier[0][i_next]))
-        cnt = cnts[i_cnt]
-        size = cv2.contourArea(cnt)
-        peri = cv2.arcLength(cnt, True)
-        approx = cv2.approxPolyDP(cnt, 0.04 * peri, True)
-        if size >= size_thresh and len(approx) == 4:
-            cnts_rect.append(approx)
-        else:
-            if i_child != -1:
-                stack.append((i_child, hier[0][i_child]))
-    return cnts_rect
+from ocr_helpers import find_card, four_point_transform
 
 
 def draw_card_graph(exist_cards, card_pool, f_len):
@@ -335,13 +105,11 @@ def detect_frame(img, card_pool, hash_size=32, size_thresh=10000,
         # (ie. has similar features), their resulting pHash value will be very close.
         # Using this property, the matching card for the given card image can be found by comparing pHash of
         # all cards in the database, then finding the card that results in the minimal difference in pHash value.
-        '''
-        img_art = img_warp[47:249, 22:294]
-        img_art = Image.fromarray(img_art.astype('uint8'), 'RGB')
-        art_hash = ih.phash(img_art, hash_size=hash_size).hash.flatten()
-        card_pool['hash_diff'] = card_pool['art_hash'].apply(lambda x: np.count_nonzero(x != art_hash))
-        '''
+        
         img_card = Image.fromarray(img_warp.astype('uint8'), 'RGB')
+
+        cv2.imshow('card#%d' % i, img_warp)
+        cv2.waitKey(0)
         # the stored values of hashes in the dataframe is pre-emptively flattened already to minimize computation time
         card_hash = ih.phash(img_card, hash_size=hash_size).hash.flatten()
         card_pool['hash_diff'] = card_pool['card_hash_%d' % hash_size]
@@ -354,14 +122,20 @@ def detect_frame(img, card_pool, hash_size=32, size_thresh=10000,
 
         # Render the result, and display them if needed
         cv2.drawContours(img_result, [cnt], -1, (0, 255, 0), 2)
-        cv2.putText(img_result, card_name, (min(pts[0][0], pts[1][0]), min(pts[0][1], pts[1][1])),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+        
+        # Ensure pts contains integer coordinates
+        pts = [(int(x), int(y)) for x, y in pts]
+        cv2.putText(img_result, card_name, (min(pts[0][0], pts[1][0]), min(pts[0][1], pts[1][1])), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
         if debug:
             # cv2.rectangle(img_warp, (22, 47), (294, 249), (0, 255, 0), 2)
             cv2.putText(img_warp, card_name + ', ' + str(hash_diff), (0, 20),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
             cv2.imshow('card#%d' % i, img_warp)
     if display:
+        height, width = img_result.shape[:2]
+        new_height = 800
+        new_width = int((new_height / height) * width)
+        img_result = cv2.resize(img_result, (new_width, new_height))
         cv2.imshow('Result', img_result)
         cv2.waitKey(0)
 
@@ -472,23 +246,14 @@ def main(args):
     if os.path.isfile(pck_path):
         card_pool = pd.read_pickle(pck_path)
     else:
-        print('Warning: pickle for card database %s is not found!' % pck_path)
-        # Merge database for all cards, then calculate pHash values of each, store them
-        df_list = []
-        for set_name in Config.all_set_list:
-            csv_name = '%s/csv/%s.csv' % (Config.data_dir, set_name)
-            df = fetch_data.load_all_cards_text(csv_name)
-            df_list.append(df)
-        card_pool = pd.concat(df_list, sort=True)
-        card_pool.reset_index(drop=True, inplace=True)
-        card_pool.drop('Unnamed: 0', axis=1, inplace=True, errors='ignore')
-        calc_image_hashes(card_pool, save_to=pck_path)
+        print('Warning: pickle for card database %s is not found! Run fetch_data!' % pck_path)
+
     ch_key = 'card_hash_%d' % args.hash_size
     card_pool = card_pool[['name', 'set', 'collector_number', ch_key]]
 
     # Processing time is almost linear to the size of the database
     # Program can be much faster if the search scope for the card can be reduced
-    card_pool = card_pool[card_pool['set'].isin(Config.set_2003_list)]
+    card_pool = card_pool[card_pool['set'].isin(Config.all_set_list)]
 
     # ImageHash is basically just one numpy.ndarray with (hash_size)^2 number of bits. pre-emptively flattening it
     # significantly increases speed for subtracting hashes in the future.
@@ -505,8 +270,9 @@ def main(args):
         if args.out_path is None:
             out_path = None
         else:
+            #TODO: Handle both image and video
             f_name = os.path.split(args.in_path)[1]
-            out_path = '%s/%s.avi' % (args.out_path, f_name[:f_name.find('.')])
+            out_path = '%s/%s.jpg' % (args.out_path, f_name[:f_name.find('.')])
 
         if not os.path.isfile(args.in_path):
             print('The test file %s doesn\'t exist!' % os.path.abspath(args.in_path))
@@ -530,19 +296,19 @@ def main(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-i', '--in', dest='in_path', help='Path of the input file. For webcam, leave it blank',
-                        type=str)
+                        type=str, default="C:\\Users\\aluhrs\\Downloads\\ocr_test\\mtg_card_detector\\images\\image4.jpg")
     parser.add_argument('-o', '--out', dest='out_path', help='Path of the output directory to save the result',
-                        type=str)
+                        type=str, default="_data")
     parser.add_argument('-hs', '--hash_size', dest='hash_size',
                         help='Size of the hash for pHash algorithm', type=int, default=16)
     parser.add_argument('-dsp', '--display', dest='display', help='Display the result', action='store_true',
-                        default=False)
-    parser.add_argument('-dbg', '--debug', dest='debug', help='Enable debug mode', action='store_true', default=False)
+                        default=True)
+    parser.add_argument('-dbg', '--debug', dest='debug', help='Enable debug mode', action='store_true', default=True)
     parser.add_argument('-gph', '--show_graph', dest='show_graph', help='Display the graph for video output', 
-                        action='store_true', default=False)
+                        action='store_true', default=True)
     args = parser.parse_args()
-    if not args.display and args.out_path is None:
+    #if not args.display and args.out_path is None:
         # Then why the heck are you running this thing in the first place?
-        print('The program isn\'t displaying nor saving any output file. Please change the setting and try again.')
-        exit()
+    #    print('The program isn\'t displaying nor saving any output file. Please change the setting and try again.')
+    #    exit()
     main(args)

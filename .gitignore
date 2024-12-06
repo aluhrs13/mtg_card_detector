@@ -30,3 +30,5 @@ CMakeLists.txt
 
 .idea/
 __pycache__/
+_data/*
+card_pool.pck

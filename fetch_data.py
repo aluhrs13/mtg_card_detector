@@ -4,6 +4,10 @@ import os
 import pandas as pd
 import re
 from urllib import request, error
+import imagehash as ih
+from PIL import Image
+import cv2
+import numpy as np
 
 from config import Config
 
@@ -13,8 +17,72 @@ Scryfall API doc is available at: https://scryfall.com/docs/api
 """
 
 
-def fetch_all_cards_text(url='https://api.scryfall.com/cards/search?q=layout:normal+format:modern+lang:en+frame:2003',
-                         csv_name=None):
+def calc_image_hashes(card_pool, save_to=None, hash_size=None):
+    """
+    Calculate perceptual hash (pHash) value for each cards in the database, then store them if needed
+    :param card_pool: pandas dataframe containing all card information
+    :param save_to: path for the pickle file to be saved
+    :param hash_size: param for pHash algorithm
+    :return: pandas dataframe
+    """
+    if hash_size is None:
+        hash_size = [16, 32]
+    elif isinstance(hash_size, int):
+        hash_size = [hash_size]
+    
+    # Since some double-faced cards may result in two different cards, create a new dataframe to store the result
+    new_pool = pd.DataFrame(columns=list(card_pool.columns.values))
+    for hs in hash_size:
+            new_pool['card_hash_%d' % hs] = np.NaN
+            #new_pool['art_hash_%d' % hs] = np.NaN
+    for ind, card_info in card_pool.iterrows():
+        if ind % 100 == 0:
+            print('Calculating hashes: %dth card' % ind)
+
+        card_names = []
+        # Double-faced cards have a different json format than normal cards
+        if card_info['layout'] in ['transform', 'double_faced_token']:
+            if isinstance(card_info['card_faces'], str):
+                card_faces = ast.literal_eval(card_info['card_faces'])
+            else:
+                card_faces = card_info['card_faces']
+            for i in range(len(card_faces)):
+                card_names.append(card_faces[i]['name'])
+        else:  # if card_info['layout'] == 'normal':
+            card_names.append(card_info['name'])
+
+        for card_name in card_names:
+            # Fetch the image - name can be found based on the card's information
+            card_info['name'] = card_name
+            img_name = '%s/card_img/png/%s/%s_%s.png' % (Config.data_dir, card_info['set'],
+                                                         card_info['collector_number'],
+                                                         get_valid_filename(card_info['name']))
+            card_img = cv2.imread(img_name)
+
+            # If the image doesn't exist, download it from the URL
+            if card_img is None:
+                fetch_card_image(card_info,
+                                            out_dir='%s/card_img/png/%s' % (Config.data_dir, card_info['set']))
+                card_img = cv2.imread(img_name)
+            if card_img is None:
+                print('WARNING: card %s is not found!' % img_name)
+
+            # Compute value of the card's perceptual hash, then store it to the database
+            #img_art = Image.fromarray(card_img[121:580, 63:685])  # For 745*1040 size card image
+            img_card = Image.fromarray(card_img)
+            for hs in hash_size:
+                card_hash = ih.phash(img_card, hash_size=hs)
+                card_info['card_hash_%d' % hs] = card_hash
+                #art_hash = ih.phash(img_art, hash_size=hs)
+                #card_info['art_hash_%d' % hs] = art_hash
+            new_pool.loc[0 if new_pool.empty else new_pool.index.max() + 1] = card_info
+
+    if save_to is not None:
+        new_pool.to_pickle(save_to)
+    return new_pool
+
+
+def fetch_all_cards_text(url, csv_name):
     """
     Given the query URL using Scryfall API, aggregate all card information and convert them from json to table
     :param url: query URL
@@ -126,7 +194,11 @@ def fetch_card_image(row, out_dir=None, size='png'):
 
 
 def main():
-    # Query card data by each set, then merge them together
+    pck_path = os.path.abspath('card_pool.pck')
+    print('Warning: pickle for card database %s is not found!' % pck_path)
+
+    #TODO: check for CSV folder, make if doesn't exist.
+    #TODO: Use bulk download, not individual API calls.
     for set_name in Config.all_set_list:
         csv_name = '%s/csv/%s.csv' % (Config.data_dir, set_name)
         print(csv_name)
@@ -138,8 +210,16 @@ def main():
         df.sort_values('collector_number')
         fetch_all_cards_image(df, out_dir='%s/card_img/png/%s' % (Config.data_dir, set_name))
 
-    #df = fetch_all_cards_text(url='https://api.scryfall.com/cards/search?q=layout:normal+lang:en+frame:2003',
-    #                          csv_name='%s/csv/all.csv' % Config.data_dir)
+    # Merge database for all cards, then calculate pHash values of each, store them
+    df_list = []
+    for set_name in Config.all_set_list:
+        csv_name = '%s/csv/%s.csv' % (Config.data_dir, set_name)
+        df = load_all_cards_text(csv_name)
+        df_list.append(df)
+    card_pool = pd.concat(df_list, sort=True)
+    card_pool.reset_index(drop=True, inplace=True)
+    card_pool.drop('Unnamed: 0', axis=1, inplace=True, errors='ignore')
+    calc_image_hashes(card_pool, save_to=pck_path)
     return
 
 

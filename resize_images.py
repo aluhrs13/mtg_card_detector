@@ -6,6 +6,7 @@ from config import Config
 
 card_size = (63, 88)
 
+#TODO: Figure out why this is here
 for subdir in glob(Config.data_dir + "/card_img/png/*"):
     split = subdir.split('/')
     split[-2] = 'tiny'
