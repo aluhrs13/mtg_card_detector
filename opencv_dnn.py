@@ -11,7 +11,6 @@ from PIL import Image
 import time
 
 from config import Config
-import fetch_data
 from ocr_helpers import find_card, four_point_transform
 
 
@@ -48,9 +47,7 @@ def draw_card_graph(exist_cards, card_pool, f_len):
         card_set = key[key.find('(') + 1:key.find(')')]
         confidence = sum(val) / f_len
         card_info = card_pool[(card_pool['name'] == card_name) & (card_pool['set'] == card_set)].iloc[0]
-        img_name = '%s/card_img/tiny/%s/%s_%s.png' % (Config.data_dir, card_info['set'],
-                                                      card_info['collector_number'],
-                                                      fetch_data.get_valid_filename(card_info['name']))
+        img_name = '%s/imgs/tiny/%s.png' % (Config.data_dir, card_info['id'])
         # If the card image is not found, just leave it blank
         if os.path.exists(img_name):
             card_img = cv2.imread(img_name)
@@ -77,7 +74,7 @@ def draw_card_graph(exist_cards, card_pool, f_len):
 
 
 def detect_frame(img, card_pool, hash_size=32, size_thresh=10000,
-                 out_path=None, display=True, debug=False):
+                 out_path=None, display=True, debug=True):
     """
     Identify all cards in the input frame, display or save the frame if needed
     :param img: input frame
@@ -94,6 +91,10 @@ def detect_frame(img, card_pool, hash_size=32, size_thresh=10000,
     det_cards = []
     # Detect contours of all cards in the image
     cnts = find_card(img_result, size_thresh=size_thresh)
+
+    if len(cnts) == 0:
+        print('No card is detected!')
+
     for i in range(len(cnts)):
         cnt = cnts[i]
         # For the region of the image covered by the contour, transform them into a rectangular image
@@ -108,8 +109,6 @@ def detect_frame(img, card_pool, hash_size=32, size_thresh=10000,
         
         img_card = Image.fromarray(img_warp.astype('uint8'), 'RGB')
 
-        cv2.imshow('card#%d' % i, img_warp)
-        cv2.waitKey(0)
         # the stored values of hashes in the dataframe is pre-emptively flattened already to minimize computation time
         card_hash = ih.phash(img_card, hash_size=hash_size).hash.flatten()
         card_pool['hash_diff'] = card_pool['card_hash_%d' % hash_size]
@@ -119,6 +118,7 @@ def detect_frame(img, card_pool, hash_size=32, size_thresh=10000,
         card_set = min_card['set']
         det_cards.append((card_name, card_set))
         hash_diff = min_card['hash_diff']
+        print(card_name)
 
         # Render the result, and display them if needed
         cv2.drawContours(img_result, [cnt], -1, (0, 255, 0), 2)
@@ -127,10 +127,9 @@ def detect_frame(img, card_pool, hash_size=32, size_thresh=10000,
         pts = [(int(x), int(y)) for x, y in pts]
         cv2.putText(img_result, card_name, (min(pts[0][0], pts[1][0]), min(pts[0][1], pts[1][1])), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
         if debug:
-            # cv2.rectangle(img_warp, (22, 47), (294, 249), (0, 255, 0), 2)
             cv2.putText(img_warp, card_name + ', ' + str(hash_diff), (0, 20),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
-            cv2.imshow('card#%d' % i, img_warp)
+            cv2.imshow('detect_frame card#%d' % i, img_warp)
     if display:
         height, width = img_result.shape[:2]
         new_height = 800
@@ -249,7 +248,7 @@ def main(args):
         print('Warning: pickle for card database %s is not found! Run fetch_data!' % pck_path)
 
     ch_key = 'card_hash_%d' % args.hash_size
-    card_pool = card_pool[['name', 'set', 'collector_number', ch_key]]
+    card_pool = card_pool[['name', 'set', 'id', ch_key]]
 
     # Processing time is almost linear to the size of the database
     # Program can be much faster if the search scope for the card can be reduced
@@ -296,9 +295,9 @@ def main(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-i', '--in', dest='in_path', help='Path of the input file. For webcam, leave it blank',
-                        type=str, default="C:\\Users\\aluhrs\\Downloads\\ocr_test\\mtg_card_detector\\images\\image4.jpg")
+                        type=str, default="C:\\Users\\aluhrs\\Downloads\\ocr_test\\mtg_card_detector\\test_file\\test1.mp4")
     parser.add_argument('-o', '--out', dest='out_path', help='Path of the output directory to save the result',
-                        type=str, default="_data")
+                        type=str, default="_data\\output")
     parser.add_argument('-hs', '--hash_size', dest='hash_size',
                         help='Size of the hash for pHash algorithm', type=int, default=16)
     parser.add_argument('-dsp', '--display', dest='display', help='Display the result', action='store_true',
