@@ -1,6 +1,11 @@
 import cv2
 import numpy as np
 
+def resize(img):
+    height, width = img.shape[:2]
+    new_height = 800
+    new_width = int((new_height / height) * width)
+    return cv2.resize(img, (new_width, new_height))
 
 def find_card(img, thresh_c=5, kernel_size=(3, 3), size_thresh=10000):
     """
@@ -11,6 +16,7 @@ def find_card(img, thresh_c=5, kernel_size=(3, 3), size_thresh=10000):
     :param size_thresh: threshold for size (in pixel) of the contour to be a candidate
     :return: list of candidate contours
     """
+    debug=False
     # Typical pre-processing - grayscale, blurring, thresholding
     img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     img_blur = cv2.medianBlur(img_gray, 5)
@@ -26,6 +32,17 @@ def find_card(img, thresh_c=5, kernel_size=(3, 3), size_thresh=10000):
     if len(cnts) == 0:
         print('no contours')
         return []
+
+    # Display the image with bounding boxes
+    # Convert the image back to BGR color space
+    img_erode_bgr = cv2.cvtColor(img_erode, cv2.COLOR_GRAY2BGR)
+    # Draw bounding boxes around all contours
+    for cnt in cnts:
+        x, y, w, h = cv2.boundingRect(cnt)
+        cv2.rectangle(img_erode_bgr, (x, y), (x + w, y + h), (0, 255, 0), 2)
+    
+    if debug:
+        cv2.imshow('Bounding Boxes', resize(img_erode_bgr))
 
     # The hierarchy from cv2.findContours() is similar to a tree: each node has an access to the parent, the first child
     # their previous and next node
@@ -47,6 +64,71 @@ def find_card(img, thresh_c=5, kernel_size=(3, 3), size_thresh=10000):
         else:
             if i_child != -1:
                 stack.append((i_child, hier[0][i_child]))
+
+    return cnts_rect
+
+def find_card_canny(img, thresh1=50, thresh2=150, kernel_size=(20, 20), size_thresh=10000):
+    """
+    Find contours of all cards in the image using Canny edge detection
+    :param img: source image
+    :param thresh1: first threshold for the hysteresis procedure in Canny edge detector
+    :param thresh2: second threshold for the hysteresis procedure in Canny edge detector
+    :param kernel_size: dimension of the kernel used for dilation and erosion
+    :param size_thresh: threshold for size (in pixel) of the contour to be a candidate
+    :return: list of candidate contours
+    """
+    debug = False
+    # Convert to grayscale
+    img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    
+    # Display grayscale image
+    if debug:
+        cv2.imshow('Grayscale Image', resize(img_gray))
+    
+    # Apply Canny edge detection
+    edges = cv2.Canny(img_gray, thresh1, thresh2)
+    # Display edges
+    if debug:
+        cv2.imshow('Canny Edges', resize(edges))
+    
+    # Dilate and erode to close gaps in edges
+    kernel = np.ones(kernel_size, np.uint8)
+    edges_dilated = cv2.dilate(edges, kernel, iterations=1)
+    edges_eroded = cv2.erode(edges_dilated, kernel, iterations=1)
+    # Display dilated and eroded edges
+    if debug:
+        cv2.imshow('Dilated and Eroded Edges', resize(edges_eroded))
+    
+    # Find contours from edges
+    cnts, _ = cv2.findContours(edges_eroded, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if len(cnts) == 0:
+        print('no contours')
+        return []
+    
+    # Optional: Draw bounding boxes around detected contours
+    img_contours = img.copy()
+    for cnt in cnts:
+        x, y, w, h = cv2.boundingRect(cnt)
+        cv2.rectangle(img_contours, (x, y), (x + w, y + h), (0, 255, 0), 2)
+    if debug:
+        cv2.imshow('Contours', resize(img_contours))
+    
+    # Filter contours to find rectangles of appropriate size
+    cnts_rect = []
+    for cnt in cnts:
+        peri = cv2.arcLength(cnt, True)
+        approx = cv2.approxPolyDP(cnt, 0.04 * peri, True)
+        if len(approx) == 4:
+            cnts_rect.append(approx)
+    if cnts_rect:
+        cnts_rect = [max(cnts_rect, key=cv2.contourArea)]
+
+        if cv2.contourArea(cnts_rect[0]) < size_thresh:
+            cnts_rect = []
+
+    if not cnts_rect:
+        cnts_rect = find_card(img, size_thresh=size_thresh)
+
     return cnts_rect
 
 # www.pyimagesearch.com/2014/08/25/4-point-opencv-getperspective-transform-example/
