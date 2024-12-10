@@ -119,10 +119,6 @@ def detect_frame(img, card_pool, hash_size=32, size_thresh=10000,
             print(f"\t{row['name']} ({row['set']}), {row['hash_diff']}")
         print("--------------------")
         min_card = top_cards.iloc[0]
-
-        if min_card['name'] == "Fury Sliver":
-            min_card = top_cards.iloc[1]
-
         card_name = min_card['name']
         card_set = min_card['set']
         det_cards.append((card_name, card_set))
@@ -263,10 +259,6 @@ def main(args):
     # significantly increases speed for subtracting hashes in the future.
     card_pool[ch_key] = card_pool[ch_key].apply(lambda x: x.hash.flatten())
 
-    # Count the number of cards in each set
-    set_counts = card_pool['set'].value_counts()
-    print(set_counts)
-
     # If the test file isn't given, use webcam to capture video
     if args.in_path is None:
         capture = cv2.VideoCapture(0)
@@ -312,7 +304,7 @@ def main(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-i', '--in', dest='in_path', help='Path of the input file. For webcam, leave it blank',
-                        type=str, default="F:\\Repos\\mtg_card_detector\\_data\\video.mp4")
+                        type=str, default="F:\\Repos\\mtg_card_detector\\test_file\\IMG_6566.MP4")
     parser.add_argument('-o', '--out', dest='out_path', help='Path of the output directory to save the result',
                         type=str, default="_data\\output")
     parser.add_argument('-hs', '--hash_size', dest='hash_size',
