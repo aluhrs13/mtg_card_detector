@@ -11,6 +11,7 @@ import time
 
 from config import Config
 from ocr_helpers import find_card_canny, four_point_transform, resize, find_card
+from process_img import id_card, process_img
 
 def draw_card_graph(exist_cards, card_pool, f_len):
     """
@@ -44,15 +45,17 @@ def draw_card_graph(exist_cards, card_pool, f_len):
         card_name = key[:key.find('(') - 1]
         card_set = key[key.find('(') + 1:key.find(')')]
         confidence = sum(val) / f_len
+        if confidence > .75:
+            print('%s (%s) is detected with %.2f%% confidence' % (card_name, card_set, confidence*100))
         card_info = card_pool[(card_pool['name'] == card_name) & (card_pool['set'] == card_set)].iloc[0]
-        img_name = '%s/imgs/tiny/%s.png' % (Config.data_dir, card_info['id'])
+        img_name = '%s/imgs/png/%s.png' % (Config.data_dir, card_info['id'])
         # If the card image is not found, just leave it blank
         if os.path.exists(img_name):
-            card_img = cv2.imread(img_name)
-        else:
-            card_img = np.ones((h_card, w_card, 3)) * 255
-            cv2.putText(card_img, 'X', ((w_card - int(txt_scale * 25)) // 2, (h_card + int(txt_scale * 25)) // 2),
-                        cv2.FONT_HERSHEY_SIMPLEX, txt_scale, (0, 255, 0), 2)
+            stock_img = cv2.imread(img_name)
+            cv2.imshow('Card Image', stock_img)
+        card_img = np.ones((h_card, w_card, 3)) * 255
+        cv2.putText(card_img, 'X', ((w_card - int(txt_scale * 25)) // 2, (h_card + int(txt_scale * 25)) // 2),
+                    cv2.FONT_HERSHEY_SIMPLEX, txt_scale, (0, 255, 0), 2)
 
         # Insert the card image, card name, and confidence bar to the graph
         img_graph[y_anchor:y_anchor + h_card, x_anchor:x_anchor + w_card] = card_img
@@ -68,6 +71,7 @@ def draw_card_graph(exist_cards, card_pool, f_len):
             x_anchor += w_card + gap + w_bar + gap
             y_anchor = gap
         pass
+
     return img_graph
 
 
@@ -84,63 +88,51 @@ def detect_frame(img, card_pool, hash_size=32, size_thresh=10000,
     :param debug: flag for debug mode
     :return: list of detected card's name/set and resulting image
     """
+    
+    settings = {
+        'max_val': 255,
+        'type_idx': 1,
+        'kernel_size': 1,
+        'adaptive_method': 1,
+        'block_size': 150,
+        'c': 3,
+        'blur': 1,
+        'min_contour_size': 100,
+    }
 
     img_result = img.copy()  # For displaying and saving
     det_cards = []
-    # Detect contours of all cards in the image
-    #cnts = find_card_canny(img_result, size_thresh=size_thresh)
-    cnts = find_card(img_result, size_thresh=size_thresh)
+    top_matches = []
+
+    processed_img, cnts = process_img(img, settings)
+
+    #TODO: Re-add handling multiple cards
+    if cnts:
+        top_matches = id_card(img, cnts[0], card_pool)
+        matched_name = top_matches[0][0]
+        cv2.putText(img_result, f"{matched_name}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0,255,0), 3, cv2.LINE_AA)
+        for match_idx, match in enumerate(top_matches):
+            cv2.putText(processed_img, f"{match[0]} ({match[1]}): {match[3]}", (10, (15*match_idx)+15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0), 1, cv2.LINE_AA)
+
+        card_name = top_matches[0][0]
+        card_set = top_matches[0][1]
+        hash_diff = top_matches[0][3]
+        det_cards.append((card_name, card_set))
+    cv2.imshow('Threshold Adjustments', processed_img)
+
+    if cnts:
+        x, y, w, h = cv2.boundingRect(cnts[0])
+        cropped_img = img[y:y+h, x:x+w]
+        cv2.imshow('Cropped Image', cropped_img)
 
     if len(cnts) == 0:
         print('No card is detected!')
 
-    for i in range(len(cnts)):
-        cnt = cnts[i]
-        # For the region of the image covered by the contour, transform them into a rectangular image
-        pts = np.float32([p[0] for p in cnt])
-        img_warp = four_point_transform(img, pts)
-
-        # To identify the card from the card image, perceptual hashing (pHash) algorithm is used
-        # Perceptual hash is a hash string built from features of the input medium. If two media are similar
-        # (ie. has similar features), their resulting pHash value will be very close.
-        # Using this property, the matching card for the given card image can be found by comparing pHash of
-        # all cards in the database, then finding the card that results in the minimal difference in pHash value.
-        
-        img_card = Image.fromarray(img_warp.astype('uint8'), 'RGB')
-
-        # the stored values of hashes in the dataframe is pre-emptively flattened already to minimize computation time
-        card_hash = ih.phash(img_card, hash_size=hash_size).hash.flatten()
-        card_pool['hash_diff'] = card_pool['card_hash_%d' % hash_size]
-        card_pool['hash_diff'] = card_pool['hash_diff'].apply(lambda x: np.count_nonzero(x != card_hash))
-        
-        # Get the top 5 closest hashes
-        top_cards = card_pool.nsmallest(5, 'hash_diff')
-        for index, row in top_cards.iterrows():
-            print(f"\t{row['name']} ({row['set']}), {row['hash_diff']}")
-        print("--------------------")
-        min_card = top_cards.iloc[0]
-        card_name = min_card['name']
-        card_set = min_card['set']
-        det_cards.append((card_name, card_set))
-        hash_diff = min_card['hash_diff']
-
-        # Render the result, and display them if needed
-        cv2.drawContours(img_result, [cnt], -1, (0, 255, 0), 2)
-        
-        # Ensure pts contains integer coordinates
-        pts = [(int(x), int(y)) for x, y in pts]
-        cv2.putText(img_result, card_name, (min(pts[0][0], pts[1][0]), min(pts[0][1], pts[1][1])), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 3)
-        if debug:
-            cv2.putText(img_warp, card_name + ', ' + str(hash_diff), (0, 40),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 3)
-            cv2.imshow('detect_frame card#%d' % i, resize(img_warp))
     if display:
         cv2.imshow('Result', resize(img_result))
         cv2.waitKey(0)
         cv2.destroyAllWindows()
 
-    if out_path is not None:
-        cv2.imwrite(out_path, img_result.astype(np.uint8))
     return det_cards, img_result
 
 
@@ -227,10 +219,6 @@ def detect_video(capture, card_pool, hash_size=32, size_thresh=10000,
                 for i in range(len(det_cards), max_num_obj):
                     cv2.imshow('card#%d' % i, resize(np.zeros((1, 1), dtype=np.uint8)))
 
-            elapsed_ms = (time.time() - start_time) * 1000
-            print('Elapsed time: %.2f ms' % elapsed_ms)
-            if out_path is not None:
-                vid_writer.write(img_save.astype(np.uint8))
             cv2.waitKey(1)
     except KeyboardInterrupt:
         capture.release()
@@ -304,7 +292,7 @@ def main(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-i', '--in', dest='in_path', help='Path of the input file. For webcam, leave it blank',
-                        type=str, default="F:\\Repos\\mtg_card_detector\\test_file\\IMG_6566.MP4")
+                        type=str, default="F:\\Repos\\mtg_card_detector\\test_file\\videos\\IMG_6567.MP4")
     parser.add_argument('-o', '--out', dest='out_path', help='Path of the output directory to save the result',
                         type=str, default="_data\\output")
     parser.add_argument('-hs', '--hash_size', dest='hash_size',
