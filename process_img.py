@@ -4,14 +4,14 @@ from ocr_helpers import four_point_transform
 from PIL import Image
 import imagehash as ih
 
-def id_card(img, cnt, card_pool):
+def id_card(img, cnt, card_pool, hash_size=16):
     # TODO: move to process_img
     pts = np.float32([p[0] for p in cnt])
     img_warp = four_point_transform(img, pts)
     img_card = Image.fromarray(img_warp.astype('uint8'), 'RGB')
 
-    card_hash = ih.phash(img_card, hash_size=16).hash.flatten()
-    card_pool['hash_diff'] = card_pool['card_hash_%d' % 16]
+    card_hash = ih.phash(img_card, hash_size=hash_size).hash.flatten()
+    card_pool['hash_diff'] = card_pool['card_hash_%d' % hash_size]
     card_pool['hash_diff'] = card_pool['hash_diff'].apply(lambda x: np.count_nonzero(x != card_hash))
     
     top_cards = card_pool.nsmallest(10, 'hash_diff')
@@ -53,11 +53,11 @@ def process_img(img, settings):
     for i, cnt in enumerate(cnts[:5]):
         x, y, w, h = cv2.boundingRect(cnt)
         color = (0, 255, 0) if i == 0 else (0, 0, 255)
-        cv2.rectangle(img, (x, y), (x + w, y + h), color, 5)
+        cv2.rectangle(img_erode_bgr, (x, y), (x + w, y + h), color, 5)
 
-    height, width = img.shape[:2]
+    height, width = img_erode_bgr.shape[:2]
     new_height = 800
     new_width = int((new_height / height) * width)
-    img_resized = cv2.resize(img, (new_width, new_height))
+    img_resized = cv2.resize(img_erode_bgr, (new_width, new_height))
 
     return img_resized, cnts
