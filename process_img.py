@@ -8,11 +8,17 @@ def id_card(img, cnt, card_pool, hash_size=16):
     # TODO: move to process_img
     pts = np.float32([p[0] for p in cnt])
     img_warp = four_point_transform(img, pts)
+
+    crop_size = 8
+    if img_warp.shape[0] > 2 * crop_size and img_warp.shape[1] > 2 * crop_size:
+        img_warp = img_warp[crop_size:-crop_size, crop_size:-crop_size]
+    cv2.imshow('Actual Analyzed Image', img_warp)
+
     img_card = Image.fromarray(img_warp.astype('uint8'), 'RGB')
 
-    card_hash = ih.phash(img_card, hash_size=hash_size).hash.flatten()
+    card_hash = ih.phash(img_card, hash_size=hash_size)#.hash.flatten()
     card_pool['hash_diff'] = card_pool['card_hash_%d' % hash_size]
-    card_pool['hash_diff'] = card_pool['hash_diff'].apply(lambda x: np.count_nonzero(x != card_hash))
+    card_pool['hash_diff'] = card_pool['hash_diff'].apply(lambda x: x-card_hash)
     
     top_cards = card_pool.nsmallest(10, 'hash_diff')
     top_cards = top_cards[['name', 'set', 'id', 'hash_diff']].to_numpy()
@@ -47,6 +53,7 @@ def process_img(img, settings):
     cnts, _ = cv2.findContours(img_prev, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
     cnts = sorted(cnts, key=cv2.contourArea, reverse=True)
     cnts = [cnt for cnt in cnts if cv2.contourArea(cnt) >= min_contour_size]
+    #Only Vertical cards
     cnts = [cnt for cnt in cnts if cv2.boundingRect(cnt)[2] <= cv2.boundingRect(cnt)[3]]
 
     img_erode_bgr = cv2.cvtColor(img_prev, cv2.COLOR_GRAY2BGR)

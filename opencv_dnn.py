@@ -68,13 +68,14 @@ def draw_card_graph(exist_cards, card_pool, f_len):
         # If the card image is not found, just leave it blank
         if os.path.exists(img_name):
             stock_img = cv2.imread(img_name)
-            #cv2.imshow('Card Image', stock_img)
-        card_img = np.ones((h_card, w_card, 3)) * 255
-        cv2.putText(card_img, 'X', ((w_card - int(txt_scale * 25)) // 2, (h_card + int(txt_scale * 25)) // 2),
-                    cv2.FONT_HERSHEY_SIMPLEX, txt_scale, (0, 255, 0), 2)
+            stock_img = cv2.resize(stock_img, (w_card, h_card))
 
         # Insert the card image, card name, and confidence bar to the graph
-        img_graph[y_anchor:y_anchor + h_card, x_anchor:x_anchor + w_card] = card_img
+        try: 
+            img_graph[y_anchor:y_anchor + h_card, x_anchor:x_anchor + w_card] = stock_img
+        except:
+            pass
+
         cv2.putText(img_graph, '%s (%s)' % (card_name, card_set),
                     (x_anchor + w_card + gap, y_anchor + gap_sm + int(txt_scale * 25)), cv2.FONT_HERSHEY_SIMPLEX,
                     txt_scale, (0, 255, 0), 1)
@@ -176,11 +177,6 @@ def detect_video(capture, card_pool, hash_size=32, size_thresh=10000,
         img_graph, new_cards = draw_card_graph({}, pd.DataFrame(), -1)  # Black image of the graph just to get the dimension
         confirmed_cards.update(new_cards)
         
-        width = round(capture.get(cv2.CAP_PROP_FRAME_WIDTH)) + img_graph.shape[1]
-        height = max(round(capture.get(cv2.CAP_PROP_FRAME_HEIGHT)), img_graph.shape[0])
-    else:
-        width = round(capture.get(cv2.CAP_PROP_FRAME_WIDTH))
-        height = round(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
     if out_path is not None:
         vid_writer = cv2.VideoWriter(out_path, cv2.VideoWriter_fourcc(*'MJPG'), 10.0, (width, height))
     max_num_obj = 0
@@ -268,7 +264,7 @@ def main(args):
 
     # ImageHash is basically just one numpy.ndarray with (hash_size)^2 number of bits. pre-emptively flattening it
     # significantly increases speed for subtracting hashes in the future.
-    card_pool[ch_key] = card_pool[ch_key].apply(lambda x: x.hash.flatten())
+    # card_pool[ch_key] = card_pool[ch_key].apply(lambda x: x.hash.flatten())
 
     # If the test file isn't given, use webcam to capture video
     if args.in_path is None:
@@ -315,11 +311,11 @@ def main(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-i', '--in', dest='in_path', help='Path of the input file. For webcam, leave it blank',
-                        type=str, default="F:\\Repos\\mtg_card_detector\\test_file\\videos\\IMG_6575.MP4")
+                        type=str)#, default="F:\\Repos\\mtg_card_detector\\test_file\\videos\\IMG_6575.MP4")
     parser.add_argument('-o', '--out', dest='out_path', help='Path of the output directory to save the result',
                         type=str, default="_data\\output")
     parser.add_argument('-hs', '--hash_size', dest='hash_size',
-                        help='Size of the hash for pHash algorithm', type=int, default=64)
+                        help='Size of the hash for pHash algorithm', type=int, default=16)
     parser.add_argument('-dsp', '--display', dest='display', help='Display the result', action='store_true',
                         default=True)
     parser.add_argument('-dbg', '--debug', dest='debug', help='Enable debug mode', action='store_true', default=True)

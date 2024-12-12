@@ -6,16 +6,15 @@ import pandas as pd
 from tqdm import tqdm 
 from process_img import process_img, id_card
 
-def get_cardpool():
-    pck_path = os.path.abspath('card_pool.pck')
+def get_cardpool(hash_size=16):
+    pck_path = os.path.abspath(f'card_pool_{hash_size}.pck')
     if os.path.isfile(pck_path):
         card_pool = pd.read_pickle(pck_path)
     else:
         print('Warning: pickle for card database %s is not found! Run fetch_data!' % pck_path)
 
-    ch_key = 'card_hash_%d' % 16
-    card_pool[ch_key] = card_pool[ch_key].apply(lambda x: x.hash.flatten())
-
+    print('Loaded card pool with %d cards' % len(card_pool))
+    ch_key = 'card_hash_%d' % hash_size
     return card_pool[['name', 'set', 'id', ch_key]]
 
 def load_names_dict(names_path):
@@ -198,6 +197,66 @@ def main(settings, image_files, card_pool, names_dict):
 
     save_names_dict(names_path, names_dict)
 
+def video(settings, card_pool):
+
+    init_settings = settings
+
+    cv2.namedWindow('Threshold Adjustments')
+
+    threshold_types = {0: cv2.THRESH_BINARY, 1: cv2.THRESH_BINARY_INV}
+    adaptive_types = {0: cv2.ADAPTIVE_THRESH_MEAN_C, 1: cv2.ADAPTIVE_THRESH_GAUSSIAN_C}
+
+    cv2.createTrackbar('Max Value', 'Threshold Adjustments', init_settings['max_val'], 255, lambda x: None)
+    cv2.createTrackbar('Type', 'Threshold Adjustments', init_settings['type_idx'], len(threshold_types)-1, lambda x: None)
+    cv2.createTrackbar('Kernel Size', 'Threshold Adjustments', init_settings['kernel_size'], 20, lambda x: None)
+    cv2.createTrackbar('Adaptive Method', 'Threshold Adjustments', init_settings['adaptive_method'], len(adaptive_types)-1, lambda x: None)
+    cv2.createTrackbar('Block Size', 'Threshold Adjustments', init_settings['block_size'], 50, lambda x: None)
+    cv2.createTrackbar('C', 'Threshold Adjustments', init_settings['c'], 20, lambda x: None)
+    cv2.createTrackbar('Blur', 'Threshold Adjustments', init_settings['blur'], 20, lambda x: None)
+    cv2.createTrackbar('Min Contour Size', 'Threshold Adjustments', init_settings['min_contour_size'], 1000, lambda x: None)
+
+    current_image_index = 0
+    count_correct = 0
+    total_images = len(image_files)
+    settings = {
+        'max_val': cv2.getTrackbarPos('Max Value', 'Threshold Adjustments'),
+        'type_idx': cv2.getTrackbarPos('Type', 'Threshold Adjustments'),
+        'kernel_size': cv2.getTrackbarPos('Kernel Size', 'Threshold Adjustments'),
+        'adaptive_method': adaptive_types[cv2.getTrackbarPos('Adaptive Method', 'Threshold Adjustments')],
+        'block_size': cv2.getTrackbarPos('Block Size', 'Threshold Adjustments'),
+        'c': cv2.getTrackbarPos('C', 'Threshold Adjustments'),
+        'blur': cv2.getTrackbarPos('Blur', 'Threshold Adjustments'),
+        'min_contour_size': cv2.getTrackbarPos('Min Contour Size', 'Threshold Adjustments'),
+        'threshold_types': threshold_types,
+        'adaptive_types': adaptive_types,
+    }
+
+    capture = cv2.VideoCapture(2)
+
+    while True:
+
+        ret, img = capture.read()
+        if not ret:
+            break
+
+        processed_img, cnts = process_img(img, settings)
+
+        top_matches = []
+        if cnts:
+            top_matches = id_card(processed_img, cnts[0], card_pool, hash_size=16)
+            matched_name = top_matches[0][0]
+            print(matched_name)
+            for match_idx, match in enumerate(top_matches):
+                color = (0, 255, 0)
+                cv2.putText(processed_img, f"{match[0]} ({match[1]}): {match[3]}", (10, (15*match_idx)+15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
+
+        cv2.imshow('Threshold Adjustments', processed_img)
+
+        if cnts:
+            x, y, w, h = cv2.boundingRect(cnts[0])
+            cropped_img = img[y:y+h, x:x+w]
+            cv2.imshow('Cropped Image', cropped_img)               
+
 if __name__ == '__main__':
     folder_path = 'F:\\Repos\\mtg_card_detector\\test_file\\basic_using_thing'
     image_files = [f for f in os.listdir(folder_path) if f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.tiff'))]
@@ -220,5 +279,6 @@ if __name__ == '__main__':
         'min_contour_size': 100,
     }
 
+    #video(init_settings, card_pool)
     main(init_settings, image_files, card_pool, ground_truth)
     #automatic_run(image_files, folder_path, card_pool, ground_truth)
