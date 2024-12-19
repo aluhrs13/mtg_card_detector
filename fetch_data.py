@@ -82,7 +82,7 @@ def fetch_all_cards_text(csv_name = "new"):
     :param csv_name: path of the csv file to save the result
     :return: pandas dataframe of the fetch cards
     """
-    with open('./_data/json/unique-artwork-20241206100306.json', 'r', encoding='utf-8') as f:
+    with open('./_data/json/default-cards-20241218223248.json', 'r', encoding='utf-8') as f:
         cards = json.load(f)
         df = pd.DataFrame.from_dict(cards)
         print(f"Number of cards fetched: {len(df)}")
@@ -91,6 +91,7 @@ def fetch_all_cards_text(csv_name = "new"):
         df = df[df['frame'].isin(["2003", "2015"])]
         df = df[df['border_color'].isin(["black", "borderless"])]
         df = df[df['set_type'].isin(['expansion', 'commander', 'masters', 'draft_innovation', 'core', 'masterpiece'])]
+        df = df[df['lang'] == 'en']
 
         # Negative Filters
         df = df[df['digital'] == False]
@@ -151,7 +152,7 @@ def fetch_card_image(row, out_dir=None, size='png'):
     # Double-faced cards have a different format, and results in two separate card images
     png_urls = []
     card_names = []
-    if row['layout'] in ['transform', 'double_faced_token']:
+    if row['layout'] in ['transform', 'double_faced_token', 'modal_dfc']:
         if isinstance(row['card_faces'], str):  # For some reason, dict isn't being parsed in the previous step
             card_faces = ast.literal_eval(row['card_faces'])
         else:
@@ -190,7 +191,7 @@ def main():
     card_pool = df
     card_pool.reset_index(drop=True, inplace=True)
     card_pool.drop('Unnamed: 0', axis=1, inplace=True, errors='ignore')
-    calc_image_hashes(card_pool, save_to=pck_path)
+    calc_image_hashes(card_pool, save_to=pck_path, hash_size=16)
     return
 
 

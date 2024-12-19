@@ -7,7 +7,7 @@ from tqdm import tqdm
 from process_img import process_img, id_card
 
 def get_cardpool(hash_size=16):
-    pck_path = os.path.abspath(f'card_pool_{hash_size}.pck')
+    pck_path = os.path.abspath(f'.\_data\pickles\card_pool_{hash_size}.pck')
     if os.path.isfile(pck_path):
         card_pool = pd.read_pickle(pck_path)
     else:
@@ -31,7 +31,7 @@ def add_name(folder_path, img_name, card_name):
         json.dump(names_data, f, indent=4)
 
 def main(settings, image_files, card_pool):
-    auto_increment = False
+    auto_increment = True
     init_settings = settings
 
     cv2.namedWindow('Threshold Adjustments')
@@ -115,7 +115,7 @@ def main(settings, image_files, card_pool):
     print(f"Accuracy: {count_correct}/{total_images}")
 
 if __name__ == '__main__':
-    folder_path = 'F:\\Repos\\mtg_card_detector\\output_images'
+    folder_path = 'F:\\Repos\\mtg_card_detector\\_data\\output_images'
     image_files = [f for f in os.listdir(folder_path) if f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.tiff'))]
     if not image_files:
         raise FileNotFoundError(f"No image files found in folder: {folder_path}")
