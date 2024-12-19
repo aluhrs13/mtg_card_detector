@@ -96,7 +96,7 @@ def fetch_all_cards_text(csv_name = "new"):
         # Negative Filters
         df = df[df['digital'] == False]
         df = df[df['oversized'] == False]
-        df = df[~df['layout'].isin(['art_series', 'token'])]
+        df = df[~df['layout'].isin(['art_series', 'token', "reversible_card"])]
         df = df[~df['name'].isin(["Forest", "Swamp", "Island", "Mountain", "Plains"])]
         print(f"Number of cards fetched for existing filters: {len(df)}")
 

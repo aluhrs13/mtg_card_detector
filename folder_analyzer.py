@@ -4,7 +4,7 @@ import cv2
 import numpy as np
 import pandas as pd
 from tqdm import tqdm 
-from process_img import process_img, id_card
+from process_img import process_img, id_card, ocr_card_name, find_closest_match
 
 def get_cardpool(hash_size=16):
     pck_path = os.path.abspath(f'.\_data\pickles\card_pool_{hash_size}.pck')
@@ -78,38 +78,49 @@ def main(settings, image_files, card_pool):
 
         processed_img, cnts = process_img(img, settings)
 
+        ocr_name = ""
         top_matches = []
-        if cnts:
-            top_matches = id_card(img, cnts[0], card_pool)
-            matched_name = top_matches[name_idx][0]
-            for match_idx, match in enumerate(top_matches):
-                if match_idx == name_idx:
-                    color = (0, 255, 0)
-                else:
-                    color = (255, 0, 0)
-
-                cv2.putText(processed_img, f"{match[0]} ({match[1]}): {match[3]}", (10, (15*match_idx)+15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
-
-        cv2.imshow('Threshold Adjustments', processed_img)
-
         if cnts:
             x, y, w, h = cv2.boundingRect(cnts[0])
             cropped_img = img[y:y+h, x:x+w]
+
+            ocr_text = ocr_card_name(cropped_img)
+
+            cv2.putText(cropped_img, f"OCR: {ocr_text}", (10, 15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0), 1, cv2.LINE_AA)
             cv2.imshow('Cropped Image', cropped_img)
 
-        key = cv2.waitKey(30)
+            top_matches = id_card(img, cnts[0], card_pool)
+            matched_name = top_matches[name_idx][0]
+
+            if ocr_text is not None:
+                ocr_matches = find_closest_match(ocr_text, [match[0] for match in top_matches])
+
+                if ocr_matches[0][1] > 75:
+                    ocr_name = ocr_matches[0][0]
+
+            for match_idx, match in enumerate(top_matches):
+            
+                overlay_str = f"{match[0]} ({match[1]}): {match[3]}"
+
+                if match[0] == ocr_name:
+                    overlay_str = "(OCR)" + overlay_str
+                    color = (0, 255, 0)
+                else:
+                    color = (0, 0, 255)
+
+                cv2.putText(processed_img, overlay_str, (10, (15*match_idx)+30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
+
+        cv2.imshow('Threshold Adjustments', processed_img)
+
+        key = cv2.waitKey(0)
         if key == 27:  # ESC key
             break
-        elif key == ord('a'):  # Left arrow key
+        elif key == ord('a'):
             add_name(folder_path, image_filename, "")
             current_image_index += 1
-        elif key == ord('w'):  # Up arrow key
-            name_idx -= 1
-        elif key == ord('d'):  # Right arrow key
+        elif key == ord('d'):
             add_name(folder_path, image_filename, matched_name)
             current_image_index += 1
-        elif key == ord('s'): # Down arrow key
-            name_idx += 1
 
     cv2.destroyAllWindows()
     print(f"Accuracy: {count_correct}/{total_images}")

@@ -3,9 +3,10 @@ import cv2
 from ocr_helpers import four_point_transform
 from PIL import Image
 import imagehash as ih
+import easyocr
+from thefuzz import process
 
 def id_card(img, cnt, card_pool, hash_size=16):
-    # TODO: move to process_img
     pts = np.float32([p[0] for p in cnt])
     img_warp = four_point_transform(img, pts)
 
@@ -20,7 +21,7 @@ def id_card(img, cnt, card_pool, hash_size=16):
     card_pool['hash_diff'] = card_pool['card_hash_%d' % hash_size]
     card_pool['hash_diff'] = card_pool['hash_diff'].apply(lambda x: x-card_hash)
     
-    top_cards = card_pool.nsmallest(10, 'hash_diff')
+    top_cards = card_pool.nsmallest(15, 'hash_diff')
     top_cards = top_cards[['name', 'set', 'id', 'hash_diff']].to_numpy()
 
     return top_cards
@@ -68,3 +69,24 @@ def process_img(img, settings):
     img_resized = cv2.resize(img_erode_bgr, (new_width, new_height))
 
     return img_resized, cnts
+
+
+def ocr_card_name(image, detail=False):
+    height, width, _ = image.shape
+    name_area = image[0:int(height * 0.33), 0:width]
+
+    cv2.imshow('Name', name_area)
+    reader = easyocr.Reader(['en'])
+    card_text = reader.readtext(name_area, detail=0)
+
+    if not card_text:
+        return None
+
+    card_name = ' '.join(card_text)
+
+    return card_name
+
+def find_closest_match(ocr_name, name_list):
+    print(ocr_name)
+    print(name_list)
+    return process.extract(ocr_name, name_list)
