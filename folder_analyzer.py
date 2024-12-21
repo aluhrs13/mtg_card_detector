@@ -30,7 +30,7 @@ def add_name(folder_path, img_name, card_name):
     with open(names_file, 'w') as f:
         json.dump(names_data, f, indent=4)
 
-def main(settings, image_files, card_pool):
+def main(settings, image_files, card_pool, names_data):
     auto_increment = True
     init_settings = settings
 
@@ -51,8 +51,6 @@ def main(settings, image_files, card_pool):
     current_image_index = 0
     count_correct = 0
     total_images = len(image_files)
-
-    name_idx = 0
 
     while current_image_index < total_images:
         image_filename = image_files[current_image_index]
@@ -86,20 +84,20 @@ def main(settings, image_files, card_pool):
 
             ocr_text = ocr_card_name(cropped_img)
 
-            cv2.putText(cropped_img, f"OCR: {ocr_text}", (10, 15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0), 1, cv2.LINE_AA)
-            cv2.imshow('Cropped Image', cropped_img)
+            #cv2.putText(cropped_img, f"OCR: {ocr_text}", (10, 15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0), 1, cv2.LINE_AA)
+            #cv2.imshow('Cropped Image', cropped_img)
 
             top_matches = id_card(img, cnts[0], card_pool)
-            matched_name = top_matches[name_idx][0]
+            matched_name = top_matches[0][0]
 
             if ocr_text is not None:
                 ocr_matches = find_closest_match(ocr_text, [match[0] for match in top_matches])
 
                 if ocr_matches[0][1] > 75:
                     ocr_name = ocr_matches[0][0]
+                    matched_name = ocr_name
 
             for match_idx, match in enumerate(top_matches):
-            
                 overlay_str = f"{match[0]} ({match[1]}): {match[3]}"
 
                 if match[0] == ocr_name:
@@ -112,15 +110,22 @@ def main(settings, image_files, card_pool):
 
         cv2.imshow('Threshold Adjustments', processed_img)
 
-        key = cv2.waitKey(0)
-        if key == 27:  # ESC key
-            break
-        elif key == ord('a'):
-            add_name(folder_path, image_filename, "")
+        if auto_increment:
+            if matched_name == names_data[image_files[current_image_index]]:
+                count_correct += 1
+
             current_image_index += 1
-        elif key == ord('d'):
-            add_name(folder_path, image_filename, matched_name)
-            current_image_index += 1
+        else:
+            key = cv2.waitKey(30)
+            if key == 27:  # ESC key
+                break
+            elif key == ord('a'):
+                #add_name(folder_path, image_filename, "")
+                current_image_index += 1
+            elif key == ord('d'):
+                #add_name(folder_path, image_filename, matched_name)
+                print("Saving name: ", matched_name)
+                current_image_index += 1
 
     cv2.destroyAllWindows()
     print(f"Accuracy: {count_correct}/{total_images}")
@@ -133,15 +138,20 @@ if __name__ == '__main__':
 
     card_pool = get_cardpool()
 
+    name_file = os.path.join(folder_path, 'names.json')
+    if os.path.isfile(name_file):
+        with open(name_file, 'r') as f:
+            names_data = json.load(f)
+
     init_settings = {
         'max_val': 255,
         'type_idx': 1,
         'kernel_size': 1,
         'adaptive_method': 1,
         'block_size': 150,
-        'c': 3,
+        'c': 5,
         'blur': 1,
         'min_contour_size': 100,
     }
 
-    main(init_settings, image_files, card_pool)
+    main(init_settings, image_files, card_pool, names_data)

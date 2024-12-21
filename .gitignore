@@ -32,3 +32,4 @@ CMakeLists.txt
 __pycache__/
 _data/*
 card_pool.pck
+.aider*

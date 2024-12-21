@@ -73,9 +73,8 @@ def process_img(img, settings):
 
 def ocr_card_name(image, detail=False):
     height, width, _ = image.shape
-    name_area = image[0:int(height * 0.33), 0:width]
+    name_area = image[0:int(height * 0.33), 0:width].copy()
 
-    cv2.imshow('Name', name_area)
     reader = easyocr.Reader(['en'])
     card_text = reader.readtext(name_area, detail=0)
 
@@ -84,9 +83,10 @@ def ocr_card_name(image, detail=False):
 
     card_name = ' '.join(card_text)
 
+    cv2.putText(name_area, card_name, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2, cv2.LINE_AA)
+    cv2.imshow('Name', name_area)
+
     return card_name
 
 def find_closest_match(ocr_name, name_list):
-    print(ocr_name)
-    print(name_list)
     return process.extract(ocr_name, name_list)

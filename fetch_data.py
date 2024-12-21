@@ -58,10 +58,10 @@ def calc_image_hashes(card_pool, save_to=None, hash_size=None):
 
             # If the image doesn't exist, download it from the URL
             if card_img is None:
+                print('WARNING: card %s is not found!' % img_name)  
+                continue
                 fetch_card_image(card_info, out_dir='%s/card_img/png' % (Config.data_dir))
                 card_img = cv2.imread(img_name)
-            if card_img is None:
-                print('WARNING: card %s is not found!' % img_name)
 
             # Compute value of the card's perceptual hash, then store it to the database
             img_card = Image.fromarray(card_img)
