@@ -30,23 +30,17 @@ def add_name(folder_path, img_name, card_name):
     with open(names_file, 'w') as f:
         json.dump(names_data, f, indent=4)
 
-def main(settings, image_files, card_pool, names_data):
-    auto_increment = True
-    init_settings = settings
+def main(image_files, card_pool, names_data):
+    auto_increment = False
+    debug = True
 
-    cv2.namedWindow('Threshold Adjustments')
-
-    threshold_types = {0: cv2.THRESH_BINARY, 1: cv2.THRESH_BINARY_INV}
-    adaptive_types = {0: cv2.ADAPTIVE_THRESH_MEAN_C, 1: cv2.ADAPTIVE_THRESH_GAUSSIAN_C}
-
-    cv2.createTrackbar('Max Value', 'Threshold Adjustments', init_settings['max_val'], 255, lambda x: None)
-    cv2.createTrackbar('Type', 'Threshold Adjustments', init_settings['type_idx'], len(threshold_types)-1, lambda x: None)
-    cv2.createTrackbar('Kernel Size', 'Threshold Adjustments', init_settings['kernel_size'], 20, lambda x: None)
-    cv2.createTrackbar('Adaptive Method', 'Threshold Adjustments', init_settings['adaptive_method'], len(adaptive_types)-1, lambda x: None)
-    cv2.createTrackbar('Block Size', 'Threshold Adjustments', init_settings['block_size'], 50, lambda x: None)
-    cv2.createTrackbar('C', 'Threshold Adjustments', init_settings['c'], 20, lambda x: None)
-    cv2.createTrackbar('Blur', 'Threshold Adjustments', init_settings['blur'], 20, lambda x: None)
-    cv2.createTrackbar('Min Contour Size', 'Threshold Adjustments', init_settings['min_contour_size'], 1000, lambda x: None)
+    if debug:
+        cv2.namedWindow('Threshold Adjustments')
+        cv2.createTrackbar('Kernel Size', 'Threshold Adjustments', 1, 20, lambda x: None)
+        cv2.createTrackbar('Block Size', 'Threshold Adjustments', 150, 50, lambda x: None)
+        cv2.createTrackbar('C', 'Threshold Adjustments', 5, 20, lambda x: None)
+        cv2.createTrackbar('Blur', 'Threshold Adjustments', 1, 20, lambda x: None)
+        cv2.createTrackbar('Min Contour Size', 'Threshold Adjustments', 100, 1000, lambda x: None)
 
     current_image_index = 0
     count_correct = 0
@@ -61,34 +55,33 @@ def main(settings, image_files, card_pool, names_data):
             current_image_index += 1
             continue
 
-        settings = {
-            'max_val': cv2.getTrackbarPos('Max Value', 'Threshold Adjustments'),
-            'type_idx': cv2.getTrackbarPos('Type', 'Threshold Adjustments'),
-            'kernel_size': cv2.getTrackbarPos('Kernel Size', 'Threshold Adjustments'),
-            'adaptive_method': adaptive_types[cv2.getTrackbarPos('Adaptive Method', 'Threshold Adjustments')],
-            'block_size': cv2.getTrackbarPos('Block Size', 'Threshold Adjustments'),
-            'c': cv2.getTrackbarPos('C', 'Threshold Adjustments'),
-            'blur': cv2.getTrackbarPos('Blur', 'Threshold Adjustments'),
-            'min_contour_size': cv2.getTrackbarPos('Min Contour Size', 'Threshold Adjustments'),
-            'threshold_types': threshold_types,
-            'adaptive_types': adaptive_types,
-        }
+        if debug:
+            kernel_size = cv2.getTrackbarPos('Kernel Size', 'Threshold Adjustments') # -1 to 30
+            block_size = cv2.getTrackbarPos('Block Size', 'Threshold Adjustments') # -1 to 300
+            c = cv2.getTrackbarPos('C', 'Threshold Adjustments')# -1 to 20
+            blur = cv2.getTrackbarPos('Blur', 'Threshold Adjustments')# -1 to 20
+            min_contour_size = cv2.getTrackbarPos('Min Contour Size', 'Threshold Adjustments')
+        else:
+            kernel_size = -1
+            block_size = 50
+            c = 5
+            blur = -1
+            min_contour_size = 100
+            canny = False
 
-        processed_img, cnts = process_img(img, settings)
+        processed_img, cnts = process_img(img, kernel_size=kernel_size, block_size=block_size, c=c, blur=blur, min_contour_size=min_contour_size, debug=debug, canny=canny)
 
         ocr_name = ""
+        matched_name = "<SKIP>"
         top_matches = []
         if cnts:
+            # Crop to top corner for OCR
             x, y, w, h = cv2.boundingRect(cnts[0])
             cropped_img = img[y:y+h, x:x+w]
+            ocr_text = ocr_card_name(cropped_img, debug=debug)
 
-            ocr_text = ocr_card_name(cropped_img)
-
-            #cv2.putText(cropped_img, f"OCR: {ocr_text}", (10, 15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0), 1, cv2.LINE_AA)
-            #cv2.imshow('Cropped Image', cropped_img)
-
-            top_matches = id_card(img, cnts[0], card_pool)
-            matched_name = top_matches[0][0]
+            # Get Phash match
+            top_matches = id_card(img, cnts[0], card_pool, debug=debug, crop_size=8)
 
             if ocr_text is not None:
                 ocr_matches = find_closest_match(ocr_text, [match[0] for match in top_matches])
@@ -105,15 +98,16 @@ def main(settings, image_files, card_pool, names_data):
                     color = (0, 255, 0)
                 else:
                     color = (0, 0, 255)
-
-                cv2.putText(processed_img, overlay_str, (10, (15*match_idx)+30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
-
-        cv2.imshow('Threshold Adjustments', processed_img)
+                if debug:
+                    cv2.putText(processed_img, overlay_str, (10, (15*match_idx)+30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
+        if debug:
+            cv2.imshow('Threshold Adjustments', processed_img)
 
         if auto_increment:
             if matched_name == names_data[image_files[current_image_index]]:
                 count_correct += 1
-
+            else:
+                print(f"{image_files[current_image_index]}({names_data[image_files[current_image_index]]}) - {matched_name}")
             current_image_index += 1
         else:
             key = cv2.waitKey(30)
@@ -143,15 +137,4 @@ if __name__ == '__main__':
         with open(name_file, 'r') as f:
             names_data = json.load(f)
 
-    init_settings = {
-        'max_val': 255,
-        'type_idx': 1,
-        'kernel_size': 1,
-        'adaptive_method': 1,
-        'block_size': 150,
-        'c': 5,
-        'blur': 1,
-        'min_contour_size': 100,
-    }
-
-    main(init_settings, image_files, card_pool, names_data)
+    main(image_files, card_pool, names_data)
